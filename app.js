@@ -39,7 +39,8 @@ const TABS = [
 
 /* ---------- 狀態 ---------- */
 let S = { me: "", projects: [], options: [], quotes: [], tenders: [], watch: [], milestones: [], cases: [], rules: { small_purchase_max: 150000 } };
-let TAB = (location.hash || "#overview").slice(1);
+let TAB = "overview";
+try { TAB = sessionStorage.getItem("war_tab") || "overview"; } catch { /* 無痕模式 */ }
 let DEMO = false;
 let ID_TOKEN = null;
 const app = document.getElementById("app");
@@ -128,7 +129,7 @@ function renderTabs() {
   document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => go(b.dataset.tab));
   document.querySelector("#tabs button.on")?.scrollIntoView({ inline: "center", block: "nearest" });
 }
-function go(tab) { TAB = tab; location.hash = tab; render(); window.scrollTo(0, 0); }
+function go(tab) { TAB = tab; try { sessionStorage.setItem("war_tab", tab); } catch { /* 無痕模式 */ } render(); window.scrollTo(0, 0); }
 
 function render() {
   renderTabs();
@@ -619,12 +620,21 @@ function demoApi(action, p) {
 /* ---------- 啟動 ---------- */
 async function boot() {
   document.getElementById("reload").onclick = reload;
-  window.addEventListener("hashchange", () => { const t = location.hash.slice(1); if (t && t !== TAB) { TAB = t; render(); } });
   DEMO = new URLSearchParams(location.search).has("demo") || !CONFIG.LIFF_ID;
   if (!DEMO) {
     try {
-      await liff.init({ liffId: CONFIG.LIFF_ID });
-      if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+      await liff.init({ liffId: CONFIG.LIFF_ID, withLoginOnExternalBrowser: true });
+      if (!liff.isLoggedIn()) {
+        // 正在處理 LINE 登入回傳（網址帶 code 或 liff.state）：SDK 會自己完成，不要再叫一次登入，否則會無限循環
+        if (/[?&](code|liff\.state|liffClientId)=/.test(location.search)) {
+          setTimeout(() => { app.innerHTML = `<div class="banner err">LINE 登入沒有完成。<a href="${location.pathname}">點這裡重新開始</a></div>`; }, 10000);
+          return;
+        }
+        liff.login();
+        return;
+      }
+      // 登入完成後把網址上的登入參數清掉，重新整理才不會出錯
+      if (location.search) history.replaceState(null, "", location.pathname);
       ID_TOKEN = liff.getIDToken();
       if (!ID_TOKEN) throw new Error("拿不到 LINE 身分憑證：請確認 LIFF 的 Scope 有勾 openid");
     } catch (e) {
