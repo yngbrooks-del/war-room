@@ -119,7 +119,7 @@ function renderTabs() {
     idea: live.filter((p) => p.stage === "idea").length,
     spec: live.filter((p) => p.stage === "spec").length,
     quote: live.filter((p) => p.stage === "quote").length,
-    tender: S.tenders.filter((t) => ["watching", "bidding"].includes(t.result)).length,
+    tender: S.tenders.filter((t) => ["watching", "bidding"].includes(t.result)).length + S.projects.filter((p) => p.stage === "tender" && !S.tenders.some((t) => t.project_id === p.id)).length,
     small: live.filter((p) => p.channel === "small_purchase").length,
     private: live.filter((p) => p.channel === "private" || p.channel === "private_project").length,
     exec: S.cases.filter((c) => c.status === "open").length,
@@ -146,6 +146,10 @@ function render() {
   bindTips(app);
   app.querySelectorAll("[data-open]").forEach((el) => el.onclick = () => openProject(Number(el.dataset.open)));
   app.querySelectorAll("[data-tender]").forEach((el) => el.onclick = () => editTender(S.tenders.find((t) => t.id === Number(el.dataset.tender))));
+  app.querySelectorAll("[data-mk-tender]").forEach((el) => el.onclick = () => {
+    const p = S.projects.find((x) => x.id === Number(el.dataset.mkTender));
+    if (p) editTender({ project_id: p.id, title: p.name, agency: p.customer, result: "bidding" });
+  });
   app.querySelectorAll("[data-ms]").forEach((el) => el.onclick = () => editMilestone(S.milestones.find((m) => m.id === Number(el.dataset.ms))));
   app.querySelectorAll("[data-go]").forEach((el) => el.onclick = () => go(el.dataset.go));
   app.querySelectorAll("[data-watch]").forEach((el) => el.onclick = () => editWatch(S.watch.find((w) => w.id === Number(el.dataset.watch))));
@@ -249,11 +253,16 @@ function vTender() {
   const list = SEG.tender === "open" ? open : SEG.tender === "done" ? done : [];
   const seg = `<div class="seg"><button data-seg="tender" data-val="open" class="${SEG.tender === "open" ? "on" : ""}">進行中 ${open.length}</button><button data-seg="tender" data-val="done" class="${SEG.tender === "done" ? "on" : ""}">已結束 ${done.length}</button><button data-seg="tender" data-val="history" class="${SEG.tender === "history" ? "on" : ""}">歷史比價</button></div>`;
   if (SEG.tender === "history") return `<h2>招標</h2><div class="row" style="margin-bottom:12px">${seg}</div>${vTenderHistory()}`;
-  return `<h2>招標</h2><div class="sub">截標、開標倒數；投標家數、過程與決標價。自動搜尋上線前可以先手動新增。</div>
+  const linked = new Set(S.tenders.map((t) => t.project_id).filter(Boolean));
+  const orphan = SEG.tender === "open" ? S.projects.filter((p) => p.stage === "tender" && !linked.has(p.id)) : [];
+  const orphanHtml = orphan.length ? `<div class="banner" style="margin-bottom:12px">以下 ${orphan.length} 個項目在「招標」階段，但還沒有標案資料（案號、截標、開標）。按「建立標案資料」補上，就會出現在下面的表格。</div>
+    <div class="list" style="margin-bottom:16px">${orphan.map((p) => `<div class="item"><div class="t">${esc(p.name)} ${chanChip(p.channel)}</div><div class="m"><span>${esc(p.customer || "")}</span>${p.note ? `<span style="white-space:normal">${esc(String(p.note).slice(0, 80))}</span>` : ""}</div><div class="row"><button class="btn small" data-mk-tender="${p.id}">建立標案資料</button><button class="btn small ghost" data-open="${p.id}">開啟項目</button></div></div>`).join("")}</div>` : "";
+  return `<h2>招標</h2><div class="sub">截標、開標倒數；投標家數、過程與決標價。自動搜尋上線前可以先手動新增，或在 LINE 把公告貼給 Una。</div>
     <div class="row" style="margin-bottom:12px">${seg}<span class="spacer"></span><span class="chip" style="white-space:normal">監控：${S.watch.filter((w) => w.active).map((w) => esc(w.value)).join("、") || "未設定"}</span></div>
-    ${list.length && innerWidth < 640 ? `<div class="list">${list.map((t) => `<div class="item" data-tender="${t.id}"><div class="t">${SEG.tender === "open" ? dueStatus(daysTo(t.bid_deadline)) : `<span class="st neutral">${esc(TENDER_RESULT[t.result])}</span>`} ${esc(t.title)}</div><div class="m"><span>${esc(t.agency || "")}</span><span>截標 ${hm(t.bid_deadline)}</span><span>開標 ${hm(t.open_time)}</span></div><div class="m"><span>預算 ${money(t.budget_amount)}</span>${t.bidders_count != null ? `<span>${t.bidders_count} 家投標</span>` : ""}${num(t.award_price) != null ? `<span>決標 ${money(t.award_price)}</span>` : ""}</div></div>`).join("")}</div>` : ""}
-    ${list.length && innerWidth >= 640 ? `<div class="tablewrap"><table><tr><th>截標</th><th>開標</th><th>標案</th><th>機關</th><th class="n">預算</th><th class="n">投標家數</th><th class="n">決標價</th><th>結果</th></tr>
-    ${list.map((t) => `<tr class="click" data-tender="${t.id}"><td>${SEG.tender === "open" ? dueStatus(daysTo(t.bid_deadline)) + " " : ""}${hm(t.bid_deadline)}</td><td>${hm(t.open_time)}</td><td style="white-space:normal;min-width:200px">${esc(t.title)}${t.case_no ? `<div class="chip">案號 ${esc(t.case_no)}</div>` : ""}</td><td>${esc(t.agency || "")}</td><td class="n">${money(t.budget_amount)}</td><td class="n">${t.bidders_count ?? "—"}</td><td class="n">${money(t.award_price)}</td><td>${esc(TENDER_RESULT[t.result])}${t.source === "auto" ? ` <span class="chip">自動</span>` : ""}</td></tr>`).join("")}</table></div>` : ""}${list.length ? "" : `<div class="empty">沒有標案</div>`}`;
+    ${orphanHtml}
+    ${list.length && innerWidth < 640 ? `<div class="list">${list.map((t) => `<div class="item" data-tender="${t.id}"><div class="t">${SEG.tender === "open" ? dueStatus(daysTo(t.bid_deadline)) : `<span class="st neutral">${esc(TENDER_RESULT[t.result])}</span>`} ${esc(t.title)}</div><div class="m"><span>${esc(t.agency || "")}</span><span>截標 ${hm(t.bid_deadline)}</span><span>開標 ${hm(t.open_time)}</span></div><div class="m">${t.tender_round ? `<span>${esc(t.tender_round)}</span>` : ""}${num(t.deposit) != null ? `<span>押標金 ${money(t.deposit)}</span>` : ""}<span>預算 ${money(t.budget_amount)}</span>${t.bidders_count != null ? `<span>${t.bidders_count} 家投標</span>` : ""}${num(t.award_price) != null ? `<span>決標 ${money(t.award_price)}</span>` : ""}</div></div>`).join("")}</div>` : ""}
+    ${list.length && innerWidth >= 640 ? `<div class="tablewrap"><table><tr><th>截標</th><th>開標</th><th>標案</th><th>機關</th><th>次數</th><th class="n">押標金</th><th class="n">預算</th><th class="n">投標家數</th><th class="n">決標價</th><th>結果</th></tr>
+    ${list.map((t) => `<tr class="click" data-tender="${t.id}"><td>${SEG.tender === "open" ? dueStatus(daysTo(t.bid_deadline)) + " " : ""}${hm(t.bid_deadline)}</td><td>${hm(t.open_time)}</td><td style="white-space:normal;min-width:200px">${esc(t.title)}${t.case_no ? `<div class="chip">案號 ${esc(t.case_no)}</div>` : ""}</td><td>${esc(t.agency || "")}</td><td>${esc(t.tender_round || "—")}</td><td class="n">${money(t.deposit)}</td><td class="n">${money(t.budget_amount)}</td><td class="n">${t.bidders_count ?? "—"}</td><td class="n">${money(t.award_price)}</td><td>${esc(TENDER_RESULT[t.result])}${t.source === "auto" ? ` <span class="chip">自動</span>` : ""}</td></tr>`).join("")}</table></div>` : ""}${list.length ? "" : `<div class="empty">沒有標案</div>`}`;
 }
 // 歷史比價：原材料用 compare_key 對同一品項；單機用關鍵字找類似案件
 function vTenderHistory() {
@@ -406,7 +415,11 @@ function formModal({ title, fields, row, table, extra = "", after, onDelete, che
       const data = { ...readForm(m, flat), ...(row.id ? { id: row.id } : {}) };
       for (const f of flat) if (f.req && (data[f.k] == null || data[f.k] === "")) return toast(`請填「${f.label}」`);
       if (check) { const msg = check(data); if (msg) return toast(msg); }
-      try { await save(table, { ...row, ...data }); close(); toast("已儲存"); render(); } catch (err) { toast("儲存失敗：" + err.message); }
+      try {
+        const saved = await save(table, { ...row, ...data });
+        if (table === "tenders" && saved.project_id) { const p = S.projects.find((x) => x.id === saved.project_id); if (p && ["idea", "spec", "quote"].includes(p.stage)) p.stage = "tender"; }
+        close(); toast("已儲存"); render();
+      } catch (err) { toast("儲存失敗：" + err.message); }
     };
     const del = m.querySelector("[data-del]");
     if (del) del.onclick = async () => {
@@ -505,6 +518,8 @@ function editTender(row, back) {
       { k: "project_id", label: "對應項目", type: "select", opts: { "": "（不對應）", ...Object.fromEntries(S.projects.map((p) => [String(p.id), p.name])) } },
       [{ k: "budget_amount", label: "預算金額", type: "number" }, { k: "announce_date", label: "公告日", type: "date" }],
       [{ k: "bid_deadline", label: "截標時間", type: "datetime-local" }, { k: "open_time", label: "開標時間", type: "datetime-local" }],
+      [{ k: "tender_round", label: "第幾次招標", ph: "例如 第二次及以後公開招標" }, { k: "deposit", label: "押標金", type: "number" }],
+      [{ k: "award_method", label: "決標方式", ph: "例如 最低標" }, { k: "bid_method", label: "投標方式", ph: "紙本／電子" }],
       [{ k: "bidders_count", label: "投標家數", type: "number" }, { k: "result", label: "結果", type: "select", opts: TENDER_RESULT }],
       { k: "bidders", label: "投標廠商" },
       [{ k: "our_bid", label: "我們的投標價", type: "number" }, { k: "award_price", label: "決標價", type: "number" }],
@@ -567,6 +582,7 @@ function demoData() {
       { id: 4, name: "包裝機零件緊急補件", customer: "馬祖酒廠", channel: "small_purchase", stage: "quote", est_amount: 98000, owner: "Roye", next_action: "送報價單", next_date: d(1) },
       { id: 5, name: "智慧倉儲輸送線構想", customer: "（示範）食品廠", channel: "private", stage: "idea", est_amount: null, owner: "Roye", next_action: "現場勘查", next_date: d(10), note: "客戶有意願，預算未定" },
       { id: 6, name: "收縮包裝機", customer: "（示範）飲料廠", channel: "private", stage: "won", est_amount: 4200000, owner: "Anna" },
+      { id: 8, name: "74mm 濾嘴紙等3項", customer: "臺灣菸酒豐原捲菸研發製造工廠", channel: "gov_tender", stage: "tender", est_amount: null, owner: "Roye", note: "案號 115-0220-2-046，第二次及以後公開招標，押標金 9 萬" },
       { id: 7, name: "封箱機更新", customer: "臺灣菸酒股份有限公司", channel: "small_purchase", stage: "idea", est_amount: 135000, owner: "Anna", next_action: "確認規格", next_date: d(12) },
     ],
     options: [
@@ -579,7 +595,7 @@ function demoData() {
       { id: 2, project_id: 4, version: 1, foreign_cost: 1900, currency: "EUR", fx_rate: 35.2, freight: 8000, duty: 3000, local_eng: 6000, other_cost: 0, markup_pct: 25, budget_price: 96000, status: "draft" },
     ],
     tenders: [
-      { id: 1, project_id: 2, case_no: "（示範）114A0123", agency: "臺灣菸酒股份有限公司", title: "瓶裝線充填機汰換工程", item_kind: "equipment", compare_key: "充填機", budget_amount: 13000000, bid_deadline: t(5, 17), open_time: t(6, 10), result: "bidding" },
+      { id: 1, project_id: 2, case_no: "（示範）114A0123", agency: "臺灣菸酒股份有限公司", title: "瓶裝線充填機汰換工程", item_kind: "equipment", compare_key: "充填機", budget_amount: 13000000, tender_round: "第一次公開招標", deposit: 500000, bid_deadline: t(5, 17), open_time: t(6, 10), result: "bidding" },
       { id: 2, case_no: "（示範）114B0456", agency: "金門酒廠", title: "BOPP 膜採購", item_kind: "material", compare_key: "BOPP膜-20μ", budget_amount: 3000000, bid_deadline: t(12, 17), open_time: t(13, 10), result: "watching", source: "auto" },
       { id: 3, case_no: "（示範）113B0221", agency: "金門酒廠", title: "BOPP 膜採購（去年）", item_kind: "material", compare_key: "BOPP膜-20μ", budget_amount: 2900000, open_time: t(-330, 10), bidders_count: 4, award_price: 2615000, winner: "（示範）甲公司", result: "lost" },
       { id: 4, case_no: "（示範）112B0198", agency: "金門酒廠", title: "BOPP 膜採購（前年）", item_kind: "material", compare_key: "BOPP膜-20μ", budget_amount: 2850000, open_time: t(-700, 10), bidders_count: 3, award_price: 2540000, winner: "（示範）乙公司", result: "lost" },
